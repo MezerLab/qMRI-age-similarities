@@ -8,9 +8,3 @@ This project focuses on analyzing microstructural changes in the brain during ag
 - **Machine Learning**: Application of advanced algorithms like XGBoost and t-SNE to classify brain regions by age and uncover patterns in brain aging.
 - **Statistical Analysis**: Use of statistical methods to explore correlations between brain regions and variability across subjects.
 - **Visualization**: Creation of visualizations such as brain region clustering plots and correlation matrices.
-
-## Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/repository-name.git
-   cd repository-name
