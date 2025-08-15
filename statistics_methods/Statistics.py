@@ -566,7 +566,8 @@ class StatisticsWrapper:
 
     @staticmethod
     def roi_correlations(data: pd.DataFrame, params_to_work_with: list, rois: list,
-                         group_title: str = None, project_name: str = None, method="pearson", show: bool = True):
+                         group_title: str = None, project_name: str = None, method="pearson",
+                        show: bool = True, threshold: float = None, show_names: bool = True):
         subjects = data.groupby('subjects')
         relevant_rois = list(data.ROI_name.unique())
         correlations = np.zeros((len(relevant_rois),
@@ -574,7 +575,15 @@ class StatisticsWrapper:
 
         for subject_name, subject_df in subjects:
             df_corr = subject_df[params_to_work_with].T.corr(method=method)
+            # df_corr = StatisticsWrapper.pairwise_r2(subject_df[params_to_work_with])
+
+            if threshold is not None:
+                # Set all correlations less than threshold to 0
+                df_corr[df_corr < threshold] = 0
+
             correlations += df_corr.to_numpy()
+        
+        PlotsManager.plot_heatmap(df_corr, "", project_name, False)
 
         correlations /= data.subjects.nunique()
         # labels = [label[4:] for label in relevant_rois]  # remove prefix as 'ctx'
@@ -587,7 +596,7 @@ class StatisticsWrapper:
 
         # plot the heatmap
         if show:
-            PlotsManager.plot_heatmap(correlations_df, group_title, project_name)
+            PlotsManager.plot_heatmap(correlations_df, group_title, project_name, show_names)
 
         return correlations_df
 
@@ -792,10 +801,12 @@ class StatisticsWrapper:
         rois_labels = [str(roi) for roi in rois]
         groups_rois_std = {}
 
-        plt.figure(figsize=fig_size)
+        fig, ax = plt.subplots(figsize=fig_size)
+        ordered_rois = sorted(rois, key=PlotsManager.custom_sort_key)
+        print(ordered_rois)
         for data, color, label in data_groups:
             rois_std = []
-            for roi in rois:
+            for roi in ordered_rois:
                 roi_std = 0
                 for param in params:
                     # Calculate CV params
@@ -806,24 +817,19 @@ class StatisticsWrapper:
                 rois_std.append(roi_std)
 
             groups_rois_std[label] = rois_std
-            plt.scatter(rois_labels, rois_std, color=color, label=label, s=70)
-            plt.xticks(rois_labels, rotation='vertical', fontsize=20)
-            plt.yticks(fontsize=16)
+            ax.scatter(rois_labels, rois_std, color=color, label=label, s=40)
+            PlotsManager.add_dividers(ax, y_loc=0.03)      
+            ax.set_xticks([])
 
-        for x, y1, y2 in zip(rois_labels, groups_rois_std['young'], groups_rois_std['old']):
-            plt.plot([x, x], [y1, y2], color='gray', linestyle='--')
+        for x, y1, y2 in zip(rois_labels, groups_rois_std[t_test_params[0]], groups_rois_std[t_test_params[1]]):
+            ax.plot([x, x], [y1, y2], color='gray', linestyle='--')
 
-        plt.title('Average Std of all parameters', fontdict = {'fontsize' : 30})
-        plt.ylabel('Average Std', fontdict = {'fontsize' : 20})
-        plt.legend(fontsize=24, loc="upper left")
-
-        if t_test_params:
-            results = stats.ttest_ind(a=groups_rois_std[t_test_params[0]], b=groups_rois_std[t_test_params[1]])
-            significance = 'significance' if results.pvalue <= 0.05 else 'no significance'
-            p_val_str = constants.SUPERSCRIPTS[round(math.log10(results.pvalue))]
-            plt.text(0.11, 0.90, f"$p < 10{p_val_str}$", fontsize=24, color='black', transform=plt.gca().transAxes)
-            print(f't_test showed {significance} difference, p < 10{p_val_str}')
-
+        ax.set_title('Average Std of all parameters', fontdict = {'fontsize' : 30})
+        ax.set_ylabel('Average Std', fontdict = {'fontsize' : 20})
+        ax.legend(bbox_to_anchor=(1.1, 1), loc="upper right", borderaxespad=0., fontsize=18)
+        ax.grid(False)
+        ax.set_facecolor("#f5f2f0")
+        ax.tick_params(axis='y', labelsize=16)
         return groups_rois_std
 
     @staticmethod
@@ -920,13 +926,15 @@ class StatisticsWrapper:
         # Scatter plot and regression line
         ax.set_facecolor('white')
         ax.scatter(x, y, s=30, alpha=0.7, edgecolors="k")
-        ax.set_xlabel(roi1, fontsize=14)
-        ax.set_ylabel(roi2, fontsize=14)
+        ax.set_xlabel(roi1, fontsize=16)
+        ax.set_ylabel(roi2, fontsize=16)
+        ax.tick_params(axis='both', which='major', labelsize=12)
         ax.plot(x, y_pred, c=".3", alpha=0.5)
         ax.set_title(title, fontsize=16)
         ax.grid(False)
         ax.patch.set_edgecolor('black')  
         ax.patch.set_linewidth(2)  
+        
 
         # Calculate and add R^2 value to the plot
         r2 = r2_score(y, y_pred)
@@ -979,3 +987,35 @@ class StatisticsWrapper:
         average_rest, rest_distances = StatisticsWrapper.calculate_average_for_rest(df, similar_pairs)
         
         return average_similar_pairs, average_rest, similar_distances, rest_distances
+    
+
+    @staticmethod
+    def pairwise_r2(df):
+        """
+        Calculates pairwise R^2 distances (without centering) between rows of a DataFrame.
+        
+        Parameters:
+            df (pd.DataFrame): The input DataFrame, where rows represent observations.
+            
+        Returns:
+            pd.DataFrame: A DataFrame containing the pairwise R^2 distances.
+        """
+        # Convert DataFrame to NumPy array for fast computation
+        arr = df.values
+
+        # Calculate the sum of squares for each row (denominator)
+        row_sums_of_squares = np.sum(arr ** 2, axis=1)
+
+        # Compute pairwise squared differences using broadcasting
+        pairwise_squared_differences = np.sum((arr[:, None, :] - arr[None, :, :]) ** 2, axis=2)
+
+        # Calculate R^2 for all pairs
+        r2_matrix = 100 * (1 - pairwise_squared_differences / row_sums_of_squares[:, None])
+
+        # Clip negative values to 0
+        r2_matrix = np.clip(r2_matrix, 0, None)
+
+        # Convert back to a DataFrame for readability
+        r2_df = pd.DataFrame(r2_matrix, index=df.index, columns=df.index)
+
+        return r2_df
